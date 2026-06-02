@@ -63,6 +63,7 @@ Issues = "https://github.com/wuyoscar/gpt_image_2_skill/issues"
 [project.scripts]
 gpt-image = "gpt_image_cli.cli:main"
 gerrymander = "gerrymander.cli:main"
+gerrymander-web = "gerrymander.web:main"
 
 [build-system]
 requires = ["setuptools>=61"]
@@ -72,4 +73,4 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-gerrymander = ["data/*.json", "data/*.csv"]
+gerrymander = ["data/*.json", "data/*.csv", "static/*.html", "static/*.css", "static/*.js", "static/images/*.png"]

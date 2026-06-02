@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gerrymander — Educational Visualizer</title>
+  <link rel="stylesheet" href="/static/leaflet.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">▦</span>
+      <span class="title">Gerrymander</span>
+      <span class="tagline">Educational district-drawing visualizer</span>
+    </div>
+    <div class="header-meta">Real US counties · 2016 vote &amp; ACS demographics</div>
+  </header>
+
+  <main>
+    <aside id="controls">
+      <section class="control-group">
+        <label for="state-select">State</label>
+        <select id="state-select"></select>
+      </section>
+
+      <section class="control-group">
+        <label for="party-radio">Benefiting party</label>
+        <div class="radio-row" id="party-radio">
+          <label><input type="radio" name="party" value="neutral" checked> Neutral</label>
+          <label><input type="radio" name="party" value="D"> Democrat</label>
+          <label><input type="radio" name="party" value="R"> Republican</label>
+        </div>
+      </section>
+
+      <section class="control-group">
+        <label for="seats-slider">
+          Seats to gerrymander
+          <span id="seats-display">—</span>
+        </label>
+        <input type="range" id="seats-slider" min="1" max="2" value="1">
+        <div class="hint" id="seats-hint">
+          The state's real congressional delegation is highlighted on the scale.
+        </div>
+      </section>
+
+      <section class="control-group">
+        <label for="intensity-slider">
+          Gerrymander intensity
+          <span id="intensity-display">0.90</span>
+        </label>
+        <input type="range" id="intensity-slider" min="0" max="1" step="0.05" value="0.9">
+      </section>
+
+      <section class="summary" id="summary">
+        <h3>Summary</h3>
+        <div class="summary-row"><span>State</span><span id="sum-state">—</span></div>
+        <div class="summary-row"><span>Seats</span><span id="sum-seats">—</span></div>
+        <div class="summary-row"><span>Favored party</span><span id="sum-party">—</span></div>
+        <div class="summary-row"><span>D vote share (statewide)</span><span id="sum-d-vote">—</span></div>
+        <div class="summary-row"><span>Projected seats</span><span id="sum-projected">—</span></div>
+      </section>
+
+      <section class="metrics" id="metrics">
+        <h3>Fairness metrics</h3>
+        <div class="summary-row"><span>Efficiency gap</span><span id="m-eg">—</span></div>
+        <div class="summary-row"><span>Mean − median (D)</span><span id="m-mm">—</span></div>
+        <div class="summary-row"><span>Partisan bias (D)</span><span id="m-pb">—</span></div>
+        <p class="hint">An efficiency gap with magnitude above ~7% is widely cited as evidence of an aggressive partisan gerrymander.</p>
+      </section>
+
+      <section class="legend">
+        <h3>Legend</h3>
+        <div class="legend-row"><span class="swatch swatch-d"></span>Democratic-leaning district</div>
+        <div class="legend-row"><span class="swatch swatch-r"></span>Republican-leaning district</div>
+        <div class="legend-row"><span class="swatch swatch-t"></span>Tossup (within ±2%)</div>
+        <p class="hint">Districts are also outlined in <b>black</b>; counties within each district share a hue.</p>
+      </section>
+
+      <footer class="foot">
+        For education and detection only. Synthesized districts on real geography.
+      </footer>
+    </aside>
+
+    <div id="map-wrap">
+      <div id="map"></div>
+      <div id="hover" class="hover-card hidden"></div>
+      <div id="loading" class="loading hidden">Drawing…</div>
+    </div>
+  </main>
+
+  <script src="/static/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
