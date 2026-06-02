@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Gerrymander Map Generator</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; display: flex; height: 100vh; }
+    #sidebar { width: 320px; padding: 16px; border-right: 1px solid #ddd; overflow-y: auto; }
+    #map { flex: 1; }
+    label { display: block; margin: 12px 0 4px; font-size: 0.9rem; }
+    select, input, button { width: 100%; padding: 6px; font-size: 0.95rem; }
+    button { margin-top: 16px; background: #1a73e8; color: white; border: 0; cursor: pointer; }
+    button:disabled { background: #888; cursor: not-allowed; }
+    #status { margin-top: 12px; font-size: 0.85rem; color: #555; min-height: 1.2em; }
+    #metrics { margin-top: 16px; font-size: 0.85rem; }
+    #metrics table { width: 100%; border-collapse: collapse; }
+    #metrics td { padding: 4px 0; border-bottom: 1px solid #eee; }
+    #metrics td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+    footer { margin-top: 24px; font-size: 0.75rem; color: #888; }
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <h2>Gerrymander Map</h2>
+
+    <label for="state">State</label>
+    <select id="state"></select>
+
+    <label for="districts">Districts</label>
+    <input id="districts" type="number" min="1" max="60" value="2" />
+
+    <label for="objective">Objective</label>
+    <select id="objective">
+      <option value="pro_dem">Favor Democrats</option>
+      <option value="pro_rep">Favor Republicans</option>
+      <option value="compact">Compact (baseline)</option>
+    </select>
+
+    <label for="steps">Chain steps: <span id="stepsLabel">500</span></label>
+    <input id="steps" type="range" min="100" max="5000" step="100" value="500" />
+
+    <button id="go">Generate plan</button>
+
+    <div id="status"></div>
+    <div id="metrics"></div>
+
+    <footer>
+      Research / education tool. Plans are produced by ReCom over real precinct
+      data (VEST) but are not intended for any official redistricting use.
+    </footer>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/web/app.js"></script>
+</body>
+</html>

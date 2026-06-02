@@ -1,0 +1,28 @@
+[project]
+name = "gerrymander"
+version = "0.1.0"
+description = "Web app that generates realistic gerrymandered US congressional district maps using real precinct data and ReCom Markov chains."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "pydantic>=2.6",
+  "requests>=2.31",
+  "geopandas>=0.14",
+  "shapely>=2.0",
+  "networkx>=3.2",
+  "gerrychain>=0.3.2",
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+gerrymander-serve = "app.main:run"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
