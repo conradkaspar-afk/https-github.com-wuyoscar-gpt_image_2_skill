@@ -8,6 +8,7 @@ import sys
 from typing import List, Optional
 
 from .state_model import build_state, list_states
+from .geo import build_state_real, list_real_states
 from .districting import neutral_districts, pack_and_crack
 from .metrics import summarize
 from .visualize import render_comparison, render_single
@@ -15,7 +16,8 @@ from .visualize import render_comparison, render_single
 
 BANNER = (
     "gerrymander — educational visualizer\n"
-    "  Synthetic precinct data. For demonstration & detection only.\n"
+    "  Real US county geography (Census TIGER) + 2016 vote / demographic data (MEDSL).\n"
+    "  For demonstration & detection only.\n"
 )
 
 
@@ -67,6 +69,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Render only the gerrymandered map (skip baseline).")
     parser.add_argument("--explain", action="store_true",
                         help="Print a short explanation of the result.")
+    parser.add_argument("--synthetic", action="store_true",
+                        help="Use the synthetic grid model instead of real county geography.")
     parser.add_argument("--list-states", action="store_true",
                         help="Print supported state codes and exit.")
     args = parser.parse_args(argv)
@@ -79,8 +83,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.error("--state is required (or use --list-states)")
 
     print(BANNER)
-    grid = build_state(args.state, seed=args.seed)
-    print(f"State: {grid.state}  precincts={grid.n}  districts={grid.num_districts}  "
+    if args.synthetic:
+        grid = build_state(args.state, seed=args.seed)
+        model = "synthetic grid"
+    else:
+        grid = build_state_real(args.state, seed=args.seed)
+        model = "real counties"
+    print(f"State: {grid.state}  [{model}]  units={grid.n}  districts={grid.num_districts}  "
           f"pop={grid.total_population():,}  baseline D lean={grid.d_lean:.2f}")
 
     neutral = neutral_districts(grid, seed=args.seed)

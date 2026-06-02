@@ -12,7 +12,8 @@ from typing import Dict, List, Optional, Tuple
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Rectangle, Polygon as MplPolygon
+from matplotlib.collections import PatchCollection
 from matplotlib.lines import Line2D
 
 from .districting import DistrictPlan
@@ -40,15 +41,15 @@ def _party_color(d_share: float) -> Tuple[float, float, float]:
         return (1.0 - 0.2 * t, 1.0 - 0.7 * t, 1.0 - 0.8 * t)
 
 
-def _draw_plan(
-    ax: plt.Axes,
-    plan: DistrictPlan,
-    view: str = "party",
-    title: str = "",
-) -> None:
+def _is_real_geo(plan: DistrictPlan) -> bool:
+    return bool(plan.grid.precincts) and hasattr(plan.grid.precincts[0], "geometry") \
+        and getattr(plan.grid.precincts[0], "geometry", None) is not None
+
+
+def _draw_plan_grid(ax: plt.Axes, plan: DistrictPlan, view: str, title: str) -> None:
     grid = plan.grid
     ax.set_xlim(-0.5, grid.cols - 0.5)
-    ax.set_ylim(grid.rows - 0.5, -0.5)  # invert so row 0 is at top
+    ax.set_ylim(grid.rows - 0.5, -0.5)
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
@@ -65,22 +66,18 @@ def _draw_plan(
         rect = Rectangle((p.col - 0.5, p.row - 0.5), 1, 1, facecolor=color, edgecolor="#999999", linewidth=0.3)
         ax.add_patch(rect)
 
-    # District boundary lines: thick black between cells of different districts.
     a = plan.assignment
     for p in grid.precincts:
         for nb in grid.neighbors(p.idx):
             if a[nb] == a[p.idx]:
                 continue
             np_ = grid.precincts[nb]
-            # Draw line between p and np_.
-            if np_.row == p.row + 1:  # neighbor below
+            if np_.row == p.row + 1:
                 ax.plot([p.col - 0.5, p.col + 0.5], [p.row + 0.5, p.row + 0.5], color="black", linewidth=1.6)
-            elif np_.col == p.col + 1:  # neighbor right
+            elif np_.col == p.col + 1:
                 ax.plot([p.col + 0.5, p.col + 0.5], [p.row - 0.5, p.row + 0.5], color="black", linewidth=1.6)
-    # Outer border.
     ax.add_patch(Rectangle((-0.5, -0.5), grid.cols, grid.rows, fill=False, edgecolor="black", linewidth=1.6))
 
-    # District labels at centroid.
     districts = plan.districts()
     votes = plan.district_d_votes()
     demos = plan.district_demographics()
@@ -98,8 +95,139 @@ def _draw_plan(
         demo_str = ", ".join(f"{k[:1].upper()}{int(v*100)}" for k, v in top_demo)
         label = f"D{d+1}\nD{d_pct:.0f}/R{100-d_pct:.0f}\n{demo_str}"
         ax.text(cx, cy, label, ha="center", va="center", fontsize=6.5,
-                color="black",
                 bbox=dict(boxstyle="round,pad=0.15", facecolor="white", alpha=0.7, edgecolor="none"))
+
+
+def _draw_plan_real(ax: plt.Axes, plan: DistrictPlan, view: str, title: str) -> None:
+    grid = plan.grid
+    bbox = getattr(grid, "_bbox", None)
+    if bbox is None:
+        xs = [c for p in grid.precincts for poly in p.geometry for ring in poly for c in [pt[0] for pt in ring]]  # type: ignore[attr-defined]
+        ys = [c for p in grid.precincts for poly in p.geometry for ring in poly for c in [pt[1] for pt in ring]]  # type: ignore[attr-defined]
+        bbox = (min(xs), min(ys), max(xs), max(ys))
+    minx, miny, maxx, maxy = bbox
+    pad = max((maxx - minx), (maxy - miny)) * 0.04
+    ax.set_xlim(minx - pad, maxx + pad)
+    ax.set_ylim(miny - pad, maxy + pad)
+    ax.set_aspect(1.0 / math.cos(math.radians((miny + maxy) / 2.0)))
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(title, fontsize=11)
+
+    # Fill each county polygon.
+    for p in grid.precincts:
+        if view == "party":
+            color = _party_color(p.d_share)
+        elif view == "demographic":
+            top = max(p.demographics, key=lambda k: p.demographics[k])
+            color = DEMO_COLORS.get(top, "#cccccc")
+        else:
+            color = "#dddddd"
+        for poly in p.geometry:  # type: ignore[attr-defined]
+            if not poly:
+                continue
+            outer = poly[0]
+            ax.add_patch(MplPolygon(outer, closed=True, facecolor=color,
+                                    edgecolor="#777777", linewidth=0.3))
+            # Holes drawn in white (rare for counties; gives a visual cue).
+            for ring in poly[1:]:
+                ax.add_patch(MplPolygon(ring, closed=True, facecolor="white",
+                                        edgecolor="#777777", linewidth=0.3))
+
+    # District boundaries: draw the segments between counties in different
+    # districts as thick lines. We approximate by drawing lines between the
+    # centroids of neighboring counties that live in different districts,
+    # AND by overlaying thick borders around districts using shared-segment detection.
+    a = plan.assignment
+    # Edge detection: for each pair of neighboring counties in different
+    # districts, find their shared polygon segments and draw them thick black.
+    for p in grid.precincts:
+        for nb in grid.neighbors(p.idx):
+            if nb <= p.idx:
+                continue
+            if a[nb] == a[p.idx]:
+                continue
+            other = grid.precincts[nb]
+            shared_segments = _shared_segments(p.geometry, other.geometry)  # type: ignore[attr-defined]
+            for seg in shared_segments:
+                xs = [pt[0] for pt in seg]
+                ys = [pt[1] for pt in seg]
+                ax.plot(xs, ys, color="black", linewidth=1.8, solid_capstyle="round")
+
+    # State outline: draw the union of all counties' outer rings minus internal edges.
+    # Simpler: outline counties on the state boundary by detecting edges not shared with any neighbor.
+    for p in grid.precincts:
+        nb_geoms = [grid.precincts[nb].geometry for nb in grid.neighbors(p.idx)]  # type: ignore[attr-defined]
+        for poly in p.geometry:  # type: ignore[attr-defined]
+            outer = poly[0]
+            for i in range(len(outer) - 1):
+                seg = (outer[i], outer[i + 1])
+                if not _segment_shared_with_any(seg, nb_geoms):
+                    ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]],
+                            color="black", linewidth=1.4)
+
+    # District labels at centroid (population-weighted).
+    districts = plan.districts()
+    votes = plan.district_d_votes()
+    demos = plan.district_demographics()
+    for d, cells in enumerate(districts):
+        if not cells:
+            continue
+        wx = wy = wp = 0.0
+        for i in cells:
+            pp = grid.precincts[i]
+            wx += pp.centroid[0] * pp.population  # type: ignore[attr-defined]
+            wy += pp.centroid[1] * pp.population  # type: ignore[attr-defined]
+            wp += pp.population
+        cx = wx / wp
+        cy = wy / wp
+        d_votes, r_votes = votes[d]
+        tot = d_votes + r_votes
+        d_pct = 100.0 * d_votes / tot if tot else 0.0
+        top_demo = sorted(demos[d].items(), key=lambda kv: -kv[1])[:2]
+        demo_str = ", ".join(f"{k[:1].upper()}{int(v*100)}" for k, v in top_demo)
+        label = f"D{d+1}\nD{d_pct:.0f}/R{100-d_pct:.0f}\n{demo_str}"
+        ax.text(cx, cy, label, ha="center", va="center", fontsize=6.0,
+                bbox=dict(boxstyle="round,pad=0.15", facecolor="white", alpha=0.78, edgecolor="none"))
+
+
+import math
+
+
+def _segments_of(geom) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+    segs = []
+    for poly in geom:
+        for ring in poly:
+            for i in range(len(ring) - 1):
+                a = (round(ring[i][0], 5), round(ring[i][1], 5))
+                b = (round(ring[i + 1][0], 5), round(ring[i + 1][1], 5))
+                if a == b:
+                    continue
+                segs.append((a, b) if a < b else (b, a))
+    return segs
+
+
+def _shared_segments(geom_a, geom_b) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+    sa = set(_segments_of(geom_a))
+    sb = set(_segments_of(geom_b))
+    return [s for s in sa if s in sb]
+
+
+def _segment_shared_with_any(seg, nb_geoms) -> bool:
+    a = (round(seg[0][0], 5), round(seg[0][1], 5))
+    b = (round(seg[1][0], 5), round(seg[1][1], 5))
+    key = (a, b) if a < b else (b, a)
+    for g in nb_geoms:
+        if key in set(_segments_of(g)):
+            return True
+    return False
+
+
+def _draw_plan(ax: plt.Axes, plan: DistrictPlan, view: str = "party", title: str = "") -> None:
+    if _is_real_geo(plan):
+        _draw_plan_real(ax, plan, view, title)
+    else:
+        _draw_plan_grid(ax, plan, view, title)
 
 
 def _legend_for(view: str) -> List[Line2D]:

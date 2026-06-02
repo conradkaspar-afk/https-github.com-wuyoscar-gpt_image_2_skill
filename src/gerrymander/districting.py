@@ -67,8 +67,15 @@ class DistrictPlan:
         return agg
 
 
+def _precinct_coords(grid: StateGrid) -> "np.ndarray":
+    """Use centroid if precincts carry one (real-geo), otherwise grid (row, col)."""
+    if grid.precincts and hasattr(grid.precincts[0], "centroid"):
+        return np.array([p.centroid for p in grid.precincts], dtype=float)  # type: ignore[attr-defined]
+    return np.array([(p.row, p.col) for p in grid.precincts], dtype=float)
+
+
 def _seed_kmeans_pp(grid: StateGrid, n: int, rng: np.random.Generator) -> List[int]:
-    coords = np.array([(p.row, p.col) for p in grid.precincts], dtype=float)
+    coords = _precinct_coords(grid)
     first = int(rng.integers(0, grid.n))
     seeds = [first]
     dists = ((coords - coords[first]) ** 2).sum(axis=1)
@@ -285,10 +292,11 @@ def pack_and_crack(
 
     # --- Pack phase ---
     # Seeds: the highest-opp cells, spatially separated.
-    coords = np.array([(p.row, p.col) for p in grid.precincts], dtype=float)
+    coords = _precinct_coords(grid)
     order = np.argsort(-opp)  # descending opp
     pack_seeds: List[int] = []
-    min_sep = max(2.0, (grid.rows + grid.cols) / (2 * k_pack + 2))
+    extent = float(coords.max(axis=0).sum() - coords.min(axis=0).sum())
+    min_sep = max(0.5, extent / (2 * k_pack + 2))
     for idx in order:
         if all(((coords[idx] - coords[s]) ** 2).sum() >= min_sep ** 2 for s in pack_seeds):
             pack_seeds.append(int(idx))
