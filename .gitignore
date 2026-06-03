@@ -39,6 +39,9 @@ build/
 dist/
 *.egg-info/
 
+# Generated CLI/web output (renders, exports, tarballs)
+out/
+
 # Claude Code runtime state (OMC-style)
 .omc/
 .omx/
