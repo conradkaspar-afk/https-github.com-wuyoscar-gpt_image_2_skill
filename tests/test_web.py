@@ -95,6 +95,22 @@ def test_plan_api_seat_count_changes(server):
     assert int(small["metrics"]["n_districts"]) == 8
 
 
+@pytest.mark.parametrize("state,party,seats", [
+    ("PA", "R", 6), ("PA", "R", 25), ("NC", "D", 10), ("OH", "R", 8),
+])
+def test_plan_api_non_default_seat_counts(server, state, party, seats):
+    """Regression: these returned HTTP 500 'list index out of range' because
+    pack_and_crack built its neutral comparison plan at the state's default
+    district count instead of the requested one."""
+    data = _get_json(
+        f"{server}/api/plan?state={state}&party={party}&seats={seats}&intensity=0.9&seed=1"
+    )
+    assert data["seats"] == seats
+    assert int(data["metrics"]["n_districts"]) == seats
+    district_ids = {f["properties"]["district_id"] for f in data["geojson"]["features"]}
+    assert district_ids == set(range(seats))
+
+
 def test_plan_api_bad_state(server):
     # Server should respond 500 with an error message, not crash.
     try:

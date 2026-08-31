@@ -39,6 +39,24 @@ def test_real_geo_districting_contiguous():
         assert _is_contiguous(grid, plan.assignment, d), f"district {d} not contiguous"
 
 
+@pytest.mark.parametrize("state,seats,party", [
+    # Cases that previously produced discontiguous or empty districts on real
+    # county graphs (islands, single huge counties, seats far above default).
+    ("HI", 5, "R"), ("DE", 2, "D"), ("AZ", 9, "D"), ("CT", 8, "R"),
+    ("MA", 12, "R"), ("FL", 31, "D"), ("NY", 29, "D"), ("CO", 8, "D"),
+    ("MD", 4, "R"), ("VA", 11, "R"), ("WV", 5, "D"),
+])
+def test_real_geo_plans_are_contiguous_and_non_empty(state, seats, party):
+    grid = build_state_real(state, seed=1)
+    seats = min(seats, grid.n)
+    plan = pack_and_crack(grid, n=seats, target_party=party, intensity=0.9, seed=1)
+    assert plan.num_districts == seats
+    used = set(plan.assignment)
+    assert used == set(range(seats)), f"empty district(s): {set(range(seats)) - used}"
+    for d in range(seats):
+        assert _is_contiguous(grid, plan.assignment, d), f"district {d} not contiguous"
+
+
 def test_real_geo_precinct_has_geometry():
     grid = build_state_real("OH", seed=1)
     p = grid.precincts[0]

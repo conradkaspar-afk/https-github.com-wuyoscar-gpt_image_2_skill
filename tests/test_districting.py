@@ -41,6 +41,27 @@ def test_random_runs():
     assert plan.num_districts == grid.num_districts
 
 
+@pytest.mark.parametrize("seats", [2, 6, 8, 13, 17, 25])
+def test_pack_and_crack_honors_custom_seat_count(seats):
+    """Regression: pack_and_crack called neutral_districts() without `n`, so a
+    seat count other than the state's default overflowed the n-sized arrays in
+    _optimize_seats with 'list index out of range'."""
+    grid = build_state("PA", seed=1)  # PA's default is 17 districts
+    plan = pack_and_crack(grid, n=seats, target_party="R", intensity=0.9, seed=1)
+    assert plan.num_districts == seats
+    assert len(set(plan.assignment)) == seats
+    for d in range(seats):
+        assert _is_contiguous(grid, plan.assignment, d)
+
+
+@pytest.mark.parametrize("seats", [3, 9, 14])
+def test_neutral_honors_custom_seat_count(seats):
+    grid = build_state("OH", seed=1)  # OH's default is 15 districts
+    plan = neutral_districts(grid, n=seats, seed=1)
+    assert plan.num_districts == seats
+    assert len(set(plan.assignment)) == seats
+
+
 def test_efficiency_gap_moves_right_direction():
     grid = build_state("NC", seed=7)
     neutral = neutral_districts(grid, seed=7)
