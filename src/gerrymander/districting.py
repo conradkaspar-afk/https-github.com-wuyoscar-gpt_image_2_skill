@@ -158,6 +158,139 @@ def _is_contiguous(grid: StateGrid, assignment: DistrictAssignment, d: int) -> b
     return len(seen) == len(cells)
 
 
+def _components(grid: StateGrid, cells: List[int], assignment: DistrictAssignment,
+                d: int) -> List[List[int]]:
+    """Connected components of district `d` within the precinct graph."""
+    remaining = set(cells)
+    out: List[List[int]] = []
+    while remaining:
+        start = next(iter(remaining))
+        comp = [start]
+        remaining.discard(start)
+        stack = [start]
+        while stack:
+            cur = stack.pop()
+            for nb in grid.neighbors(cur):
+                if nb in remaining and assignment[nb] == d:
+                    remaining.discard(nb)
+                    comp.append(nb)
+                    stack.append(nb)
+        out.append(comp)
+    return out
+
+
+def _repair_plan(grid: StateGrid, assignment: DistrictAssignment,
+                 n: int) -> DistrictAssignment:
+    """Enforce the plan invariants: every district non-empty and contiguous.
+
+    Construction on real county graphs can strand fragments (islands joined by
+    synthetic adjacency edges, very uneven county sizes) or leave a district
+    with no cells. Rather than special-case every construction path, this runs
+    last and repairs whatever it is given:
+
+      1. Each district keeps only its largest connected component; cells in
+         smaller fragments are re-attached to an adjacent district.
+      2. Any empty district is refilled by splitting a contiguous chunk off the
+         most-populous district, choosing only cells whose removal leaves that
+         district connected.
+    """
+    # --- 1. Strand-free: keep the largest component of each district. --------
+    by_district: Dict[int, List[int]] = {}
+    for i, d in enumerate(assignment):
+        by_district.setdefault(d, []).append(i)
+
+    orphans: List[int] = []
+    for d, cells in by_district.items():
+        comps = _components(grid, cells, assignment, d)
+        if len(comps) <= 1:
+            continue
+        comps.sort(key=lambda c: sum(grid.precincts[i].population for i in c), reverse=True)
+        for comp in comps[1:]:
+            orphans.extend(comp)
+    for i in orphans:
+        assignment[i] = -1
+
+    # Re-attach orphans to an adjacent district, smallest population first.
+    pops = [0] * n
+    for i, d in enumerate(assignment):
+        if d >= 0:
+            pops[d] += grid.precincts[i].population
+    pending = list(orphans)
+    while pending:
+        progressed = False
+        still: List[int] = []
+        for i in pending:
+            cand = {assignment[nb] for nb in grid.neighbors(i) if assignment[nb] >= 0}
+            if not cand:
+                still.append(i)
+                continue
+            pick = min(cand, key=lambda d: pops[d])
+            assignment[i] = pick
+            pops[pick] += grid.precincts[i].population
+            progressed = True
+        if not progressed:
+            # Fully disconnected leftovers: attach to the smallest district.
+            fallback = min(range(n), key=lambda d: pops[d])
+            for i in still:
+                assignment[i] = fallback
+                pops[fallback] += grid.precincts[i].population
+            break
+        pending = still
+
+    # --- 2. Refill empty districts by splitting the largest one. -------------
+    for d in range(n):
+        if any(a == d for a in assignment):
+            continue
+        # Donate from a district that actually has cells to spare. Ranking by
+        # population alone can pick a single huge county, which cannot be split.
+        cells_by_district: Dict[int, List[int]] = {}
+        for i, a in enumerate(assignment):
+            if a >= 0:
+                cells_by_district.setdefault(a, []).append(i)
+        splittable = [x for x, cs in cells_by_district.items() if len(cs) >= 2]
+        if not splittable:
+            continue  # every district is a single unit; leave as-is
+        donor = max(splittable, key=lambda x: (
+            len(cells_by_district[x]),
+            sum(grid.precincts[i].population for i in cells_by_district[x]),
+        ))
+        donor_cells = cells_by_district[donor]
+        # Start from the donor cell furthest from the donor's centre of mass so
+        # the piece we peel off sits on the district's edge.
+        cx = sum(grid.precincts[i].row for i in donor_cells) / len(donor_cells)
+        cy = sum(grid.precincts[i].col for i in donor_cells) / len(donor_cells)
+        start = max(donor_cells, key=lambda i:
+                    (grid.precincts[i].row - cx) ** 2 + (grid.precincts[i].col - cy) ** 2)
+        target = max(1, len(donor_cells) // 2)
+        accepted: set = set()
+        frontier = [start]
+        seen = {start}
+        while frontier and len(accepted) < target:
+            cell = frontier.pop(0)
+            # Enqueue neighbours before attempting the move: a rejected move
+            # must not end the search, or a district whose first candidate
+            # fails the contiguity check would never be filled at all.
+            for nb in grid.neighbors(cell):
+                if nb not in seen and assignment[nb] == donor:
+                    seen.add(nb)
+                    frontier.append(nb)
+            if assignment[cell] != donor:
+                continue
+            # The new district must itself stay in one piece, so only take a
+            # cell touching what we have already taken.
+            if accepted and not any(nb in accepted for nb in grid.neighbors(cell)):
+                continue
+            if sum(1 for a in assignment if a == donor) <= 1:
+                break
+            assignment[cell] = d
+            # Only keep the move if the donor stays in one piece too.
+            if not _is_contiguous(grid, assignment, donor):
+                assignment[cell] = donor
+                continue
+            accepted.add(cell)
+    return assignment
+
+
 def _rebalance(
     grid: StateGrid,
     assignment: DistrictAssignment,
@@ -226,6 +359,7 @@ def neutral_districts(grid: StateGrid, n: Optional[int] = None, seed: int = 0) -
     seeds = _seed_kmeans_pp(grid, n, rng)
     assignment = _grow_regions(grid, seeds)
     assignment = _rebalance(grid, assignment, n)
+    assignment = _repair_plan(grid, assignment, n)
     return DistrictPlan(grid=grid, assignment=assignment, label="neutral")
 
 
@@ -237,6 +371,7 @@ def random_districts(grid: StateGrid, n: Optional[int] = None, seed: int = 0) ->
     seeds = list(rng.choice(grid.n, size=n, replace=False))
     assignment = _grow_regions(grid, seeds)
     assignment = _rebalance(grid, assignment, n)
+    assignment = _repair_plan(grid, assignment, n)
     return DistrictPlan(grid=grid, assignment=assignment, label="random")
 
 
@@ -311,31 +446,53 @@ def pack_and_crack(
 
     assignment: List[int] = [-1] * grid.n
     pops = [0] * n
-    # Grow each pack district greedily, choosing the highest-opp adjacent cell.
+
+    # Claim every pack seed BEFORE any growth. Growing districts one at a time
+    # while seeds were still unclaimed let an earlier district absorb a later
+    # district's seed cell; re-seeding then punched a hole in the earlier
+    # district and stranded the later one as an island, so both ended up
+    # discontiguous.
     for d, s in enumerate(pack_seeds):
         assignment[s] = d
         pops[d] = grid.precincts[s].population
-        frontier: List[Tuple[float, int, int]] = []
-        counter = 0
+
+    # Grow the pack districts round-robin so no single district monopolizes the
+    # strongest opponent cells, each taking its highest-opponent adjacent cell.
+    frontiers: List[List[Tuple[float, int, int]]] = [[] for _ in range(k_pack)]
+    counter = 0
+    for d, s in enumerate(pack_seeds):
         for nb in grid.neighbors(s):
             if assignment[nb] == -1:
-                heapq.heappush(frontier, (-float(opp[nb]), counter, nb))
+                heapq.heappush(frontiers[d], (-float(opp[nb]), counter, nb))
                 counter += 1
-        while frontier and pops[d] < target_pop:
-            _, _, nb = heapq.heappop(frontier)
-            if assignment[nb] != -1:
+
+    active = set(range(k_pack))
+    while active:
+        for d in sorted(active):
+            frontier = frontiers[d]
+            if pops[d] >= target_pop:
+                active.discard(d)
                 continue
-            # At low intensity, become picky and stop absorbing weak cells.
-            if opp[nb] < 0.5 and pops[d] > 0.5 * target_pop and intensity < 0.95:
-                # Only keep absorbing weak cells if district isn't yet ~target.
-                if pops[d] > target_pop * (1.0 - 0.2 * intensity):
+            grew = False
+            while frontier:
+                _, _, nb = heapq.heappop(frontier)
+                if assignment[nb] != -1:
                     continue
-            assignment[nb] = d
-            pops[d] += grid.precincts[nb].population
-            for nn in grid.neighbors(nb):
-                if assignment[nn] == -1:
-                    heapq.heappush(frontier, (-float(opp[nn]), counter, nn))
-                    counter += 1
+                # At low intensity, become picky and stop absorbing weak cells.
+                if opp[nb] < 0.5 and pops[d] > 0.5 * target_pop and intensity < 0.95:
+                    # Only keep absorbing weak cells if district isn't yet ~target.
+                    if pops[d] > target_pop * (1.0 - 0.2 * intensity):
+                        continue
+                assignment[nb] = d
+                pops[d] += grid.precincts[nb].population
+                for nn in grid.neighbors(nb):
+                    if assignment[nn] == -1:
+                        heapq.heappush(frontier, (-float(opp[nn]), counter, nn))
+                        counter += 1
+                grew = True
+                break
+            if not grew:
+                active.discard(d)
 
     # --- Crack phase ---
     # Remaining cells: grow n - k_pack districts via k-means++ on remaining cells,
@@ -348,16 +505,29 @@ def pack_and_crack(
         fweights /= fweights.sum()
         first = int(rng.choice(remaining, p=fweights))
         crack_seeds = [first]
+        taken = {first}
         rem_coords = coords[remaining]
         dists = ((rem_coords - coords[first]) ** 2).sum(axis=1)
         n_crack = n - k_pack
         for _ in range(n_crack - 1):
             probs = dists * fweights
+            # Zero out cells already used as a seed: rng.choice samples with
+            # replacement, and a duplicate seed would leave one district with no
+            # cells of its own while stranding the other.
+            for j, cell in enumerate(remaining):
+                if cell in taken:
+                    probs[j] = 0.0
             if probs.sum() <= 0:
-                probs = fweights.copy()
-            probs /= probs.sum()
-            nxt = int(rng.choice(remaining, p=probs))
+                # Fall back to any unused remaining cell.
+                free = [c for c in remaining if c not in taken]
+                if not free:
+                    break
+                nxt = int(free[0])
+            else:
+                probs = probs / probs.sum()
+                nxt = int(rng.choice(remaining, p=probs))
             crack_seeds.append(nxt)
+            taken.add(nxt)
             nd = ((rem_coords - coords[nxt]) ** 2).sum(axis=1)
             dists = np.minimum(dists, nd)
 
@@ -406,7 +576,10 @@ def pack_and_crack(
 
     # Also try starting from a compact neutral plan and optimizing — guarantees
     # the result is never worse than the neutral baseline for the target party.
-    neutral_assn = neutral_districts(grid, seed=seed).assignment
+    # `n` must be passed through: without it this builds the state's default
+    # district count, whose ids then overflow the n-sized arrays in
+    # _optimize_seats whenever the caller asked for a different seat count.
+    neutral_assn = neutral_districts(grid, n=n, seed=seed).assignment
     from_neutral = _optimize_seats(grid, list(neutral_assn), n, target_party, max_passes=400)
 
     redraw_seats = _count_target_seats(grid, redraw_assn, n, target_party)
@@ -414,6 +587,7 @@ def pack_and_crack(
     chosen = redraw_assn if redraw_seats >= neutral_seats else from_neutral
 
     label = f"gerrymander({target_party}, intensity={intensity:.2f})"
+    chosen = _repair_plan(grid, list(chosen), n)
     return DistrictPlan(grid=grid, assignment=chosen, label=label)
 
 
